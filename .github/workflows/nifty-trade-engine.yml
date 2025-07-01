@@ -1,0 +1,28 @@
+name: Nifty Option Trade Engine
+
+on:
+  schedule:
+    - cron: "*/10 3-9 * * 1-5"  # Every 10 mins between 8:30–2:30pm IST (Mon–Fri)
+  workflow_dispatch:
+
+jobs:
+  run-trade-engine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run trade engine
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python trade_engine.py
