@@ -37,50 +37,48 @@ def fetch_nifty_chain(cache_minutes=10):
             return pd.read_csv(cache_file)
 
     try:
-        url = "https://nseindia.vercel.app/api/option-chain-indices?symbol=NIFTY"
-        response = requests.get(url, timeout=10)
+        url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.nseindia.com/option-chain",
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
+        _ = session.get("https://www.nseindia.com", timeout=5)
+        response = session.get(url, timeout=10)
+
         if response.status_code != 200:
             print(f"❌ NSE fetch failed: HTTP {response.status_code}")
             return None
 
         data = response.json()
-        records = data['data']
-        spot = data['value']
+        records = data['records']['data']
+        spot = data['records']['underlyingValue']
 
         rows = []
         for item in records:
-            row = {
-                'expiryDate': item.get('expiryDate'),
-                'strikePrice': item.get('strikePrice'),
-                'lastPrice': item.get('lastPrice'),
-                'impliedVolatility': item.get('impliedVolatility'),
-                'openInterest': item.get('openInterest'),
-                'changeinOpenInterest': item.get('changeinOpenInterest'),
-                'type': item.get('optionType'),
-            }
-            row['underlyingValue'] = spot
-            rows.append(row)
+            strike = item.get("strikePrice")
+            for opt in ["CE", "PE"]:
+                if opt in item:
+                    row = item[opt]
+                    row["Type"] = opt
+                    row["Strike"] = strike
+                    row["underlyingValue"] = spot
+                    rows.append(row)
 
         df = pd.DataFrame(rows)
         df.rename(columns={
-            'strikePrice': 'Strike',
-            'lastPrice': 'LTP',
-            'impliedVolatility': 'IV',
-            'openInterest': 'OI',
-            'changeinOpenInterest': 'Chg OI',
-            'type': 'Type'
+            "lastPrice": "LTP",
+            "impliedVolatility": "IV",
+            "openInterest": "OI",
+            "changeinOpenInterest": "Chg OI",
         }, inplace=True)
 
-        df = df[df['expiryDate'].notna()]
-        df["IV"] = pd.to_numeric(df["IV"], errors="coerce")
-        df["OI"] = pd.to_numeric(df["OI"], errors="coerce")
-        df["Chg OI"] = pd.to_numeric(df["Chg OI"], errors="coerce")
-        df["Strike"] = pd.to_numeric(df["Strike"], errors="coerce")
-        df["LTP"] = pd.to_numeric(df["LTP"], errors="coerce")
         df["Theta"] = df["LTP"].apply(lambda x: -abs(x) * 10 / 7 if pd.notnull(x) else 0)
-        df["expiryDate"] = pd.to_datetime(df["expiryDate"], errors="coerce")
         df = df.dropna()
-
         df.to_csv(cache_file, index=False)
         return df
 
