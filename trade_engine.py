@@ -115,13 +115,20 @@ def compute_bsm_delta(S, K, T, r, sigma, option_type):
 
 def send_telegram_alert(message):
     try:
-        max_len = 4000
-        parts = [message[i:i+max_len] for i in range(0, len(message), max_len)]
-        for part in parts:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=part)
+        max_len = 4096
+        lines = message.split('\n')
+        buffer = ""
+        for line in lines:
+            if len(buffer) + len(line) + 1 > max_len:
+                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=buffer)
+                buffer = ""
+            buffer += line + "\n"
+        if buffer:
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=buffer)
         print("📨 Telegram alert sent!")
     except Exception as e:
         print("❌ Telegram alert failed:", e)
+
 
 
 # 🚨 Evaluate Trade Alerts
