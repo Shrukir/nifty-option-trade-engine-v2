@@ -113,21 +113,25 @@ def compute_bsm_delta(S, K, T, r, sigma, option_type):
 
 # 🔔 Telegram Alert
 
+import textwrap
+import re
+
 def send_telegram_alert(message):
     try:
-        max_len = 4096
-        lines = message.split('\n')
-        buffer = ""
-        for line in lines:
-            if len(buffer) + len(line) + 1 > max_len:
-                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=buffer)
-                buffer = ""
-            buffer += line + "\n"
-        if buffer:
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=buffer)
+        # Strip emojis and weird symbols (optional)
+        safe_message = re.sub(r'[^\x00-\x7F]+', '', message)
+
+        # Split message into chunks of 4000 characters
+        chunks = textwrap.wrap(safe_message, width=4000, break_long_words=False, replace_whitespace=False)
+
+        for i, chunk in enumerate(chunks):
+            print(f"Sending chunk {i+1}/{len(chunks)} with {len(chunk)} chars")
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
+
         print("📨 Telegram alert sent!")
     except Exception as e:
         print("❌ Telegram alert failed:", e)
+
 
 
 
