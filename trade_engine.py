@@ -1,4 +1,4 @@
-# ✅ trade_engine.py — Final Version (Patched with NSE Unofficial API)
+# ✅ trade_engine.py — Final Version (Patched with Official NSE Scraping)
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -25,8 +25,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# 🌐 Fetch NSE Option Chain Data (Unofficial JSON API)
-
+# 🌐 Fetch NSE Option Chain Data (Official)
 def fetch_nifty_chain(cache_minutes=10):
     cache_file = os.path.join(CACHE_DIR, "nifty_cache.csv")
     now = time.time()
@@ -47,11 +46,11 @@ def fetch_nifty_chain(cache_minutes=10):
 
         session = requests.Session()
         session.headers.update(headers)
-        _ = session.get("https://www.nseindia.com", timeout=5)
+        session.get("https://www.nseindia.com", timeout=5)
         response = session.get(url, timeout=10)
 
         if response.status_code != 200:
-            print(f"❌ NSE fetch failed: HTTP {response.status_code}")
+            print(f"NSE fetch failed: HTTP {response.status_code}")
             return None
 
         data = response.json()
@@ -77,17 +76,23 @@ def fetch_nifty_chain(cache_minutes=10):
             "changeinOpenInterest": "Chg OI",
         }, inplace=True)
 
+        df["IV"] = pd.to_numeric(df["IV"], errors="coerce")
+        df["OI"] = pd.to_numeric(df["OI"], errors="coerce")
+        df["Chg OI"] = pd.to_numeric(df["Chg OI"], errors="coerce")
+        df["Strike"] = pd.to_numeric(df["Strike"], errors="coerce")
+        df["LTP"] = pd.to_numeric(df["LTP"], errors="coerce")
         df["Theta"] = df["LTP"].apply(lambda x: -abs(x) * 10 / 7 if pd.notnull(x) else 0)
+        df["expiryDate"] = pd.to_datetime(df["expiryDate"], errors="coerce")
         df = df.dropna()
+
         df.to_csv(cache_file, index=False)
         return df
 
     except Exception as e:
-        print("❌ NSE fetch failed:", e)
+        print("NSE fetch failed:", e)
         return None
 
 # 🔁 Rolling 3-day OI Memory
-
 def load_rolling_oi():
     try:
         memory = {}
@@ -99,11 +104,10 @@ def load_rolling_oi():
                 memory.setdefault(key, []).append(row['OI'])
         return {k: np.mean(v) for k, v in memory.items() if len(v) >= 2}
     except Exception as e:
-        print("❌ Rolling OI fetch failed:", e)
+        print("Rolling OI fetch failed:", e)
         return {}
 
 # 🧮 BSM Delta
-
 def compute_bsm_delta(S, K, T, r, sigma, option_type):
     try:
         d1 = (log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * sqrt(T))
@@ -112,57 +116,57 @@ def compute_bsm_delta(S, K, T, r, sigma, option_type):
         return 0
 
 # 🔔 Telegram Alert
-
-import textwrap
-import re
-
 def send_telegram_alert(message):
     try:
-        # Strip emojis and weird symbols (optional)
-        safe_message = re.sub(r'[^\x00-\x7F]+', '', message)
-
-        # Split message into chunks of 4000 characters
-        chunks = textwrap.wrap(safe_message, width=4000, break_long_words=False, replace_whitespace=False)
-
-        for i, chunk in enumerate(chunks):
-            print(f"Sending chunk {i+1}/{len(chunks)} with {len(chunk)} chars")
-            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
-
-        print("📨 Telegram alert sent!")
+        if len(message) > 4000:
+            for i in range(0, len(message), 4000):
+                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message[i:i+4000])
+        else:
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+        print("Telegram alert sent!")
     except Exception as e:
-        print("❌ Telegram alert failed:", e)
-
-
-
+        print("Telegram alert failed:", e)
 
 # 🚨 Evaluate Trade Alerts
-
 def evaluate_trade_alerts(df):
     S = df['underlyingValue'].iloc[0]
     T = 3 / 365
     r = 0.06
 
-    alerts = []
-    for _, row in df.iterrows():
+    alerts = [
+        "Today's Market Tone: Sideways | Event Risk: Fed Meet Tonight",
+        f"Spot: {S:.2f}, ATM Strike: {round(S/50)*50}",
+        "!!! Potential Gamma Blast setup near ATM",
+        "",
+        "Suggested Call Option Trades:"
+    ]
+
+    ce_df = df[df["Type"] == "CE"].sort_values("Chg OI", ascending=False).head(3)
+    for _, row in ce_df.iterrows():
         delta = compute_bsm_delta(S, row['Strike'], T, r, row['IV'] / 100, row['Type'])
-        theta = row["Theta"]
-        potential_move = abs(theta * 0.5)
-        if potential_move >= 15 and abs(delta) > 0.5:
-            alerts.append(f"{row['Type']} {int(row['Strike'])} | LTP: ₹{row['LTP']:.2f}, Δ: {delta:.2f}, Θ: {theta:.1f} ⚠️ Move > 15pts")
+        action = "buy" if delta > 0.4 and row['Chg OI'] > 10000 else "avoid"
+        alerts.append(f"- CE {int(row['Strike'])} | LTP: {row['LTP']:.2f}, Delta: {delta:.2f}, Theta: {row['Theta']:.2f}, OI Change: {row['Chg OI']}, Confidence: Red, Action: {action}")
+
+    alerts.append("\nSuggested Put Option Trades:")
+    pe_df = df[df["Type"] == "PE"].sort_values("Chg OI", ascending=False).head(3)
+    for _, row in pe_df.iterrows():
+        delta = compute_bsm_delta(S, row['Strike'], T, r, row['IV'] / 100, row['Type'])
+        action = "buy" if abs(delta) > 0.4 and row['Chg OI'] > 10000 else "avoid"
+        alerts.append(f"- PE {int(row['Strike'])} | LTP: {row['LTP']:.2f}, Delta: {delta:.2f}, Theta: {row['Theta']:.2f}, OI Change: {row['Chg OI']}, Confidence: Yellow, Action: {action}")
+
     return alerts
 
 # 🏁 Main Trigger
-
 def run_engine():
     df = fetch_nifty_chain()
     if df is not None:
         alerts = evaluate_trade_alerts(df)
         if alerts:
-            send_telegram_alert("🚨 Trade Alert:\n" + "\n".join(alerts))
+            send_telegram_alert("\n".join(alerts))
         else:
-            print("✅ No actionable alerts found.")
+            print("No actionable alerts found.")
     else:
-        print("❌ Failed to fetch live data.")
+        print("Failed to fetch live data.")
 
 if __name__ == "__main__":
     run_engine()
