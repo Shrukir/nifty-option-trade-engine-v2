@@ -16,7 +16,7 @@ import os
 import time
 import telegram
 
-# 📡 Telegram Bot Setup
+# 🌐 Telegram Bot Setup
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
@@ -69,14 +69,14 @@ def fetch_nifty_chain():
         print("❌ NSE fetch failed:", e)
         return None
 
-# 📌 ATM Strike
+# 🖌 ATM Strike
 
 def get_atm_strike(df):
     spot = df['underlyingValue'].iloc[0]
     atm = round(spot / 50) * 50
     return spot, atm
 
-# 📐 Delta Calculator
+# ✖️ Delta Calculator
 
 def compute_bsm_delta(S, K, T, r, sigma, option_type):
     try:
@@ -94,18 +94,25 @@ def build_trade_alert(df):
     spot, atm_strike = get_atm_strike(df)
     T = 3 / 365
     r = 0.06
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     df = df[(df['Strike'].between(atm_strike - 500, atm_strike + 500)) & (df['LTP'] > 10)]
     df['Delta'] = df.apply(lambda row: compute_bsm_delta(spot, row['Strike'], T, r, row['IV'] / 100, row['Type']), axis=1)
     df['Theta'] = -np.abs(df['LTP'] / 7 * 10)
 
     df = df[df['LTP'] > 15]
-    df = df.sort_values('LTP', ascending=False).head(150)
+    df = df.sort_values('LTP', ascending=False)
 
-    alert_lines = [f"Trade Alert:\nSpot: {spot:.2f} | ATM: {atm_strike} !!! Potential Gamma Blast near ATM\n"]
+    alert_lines = [f"Trade Alert ({now}):\nSpot: {spot:.2f} | ATM: {atm_strike} !!! Potential Gamma Blast near ATM"]
 
-    for _, row in df.iterrows():
-        alert_lines.append(f"{row['Type']} {int(row['Strike'])} | LTP: {row['LTP']:.2f}, Delta: {row['Delta']:.2f}, Theta: {row['Theta']:.1f}  Move > 15pts")
+    def format_row(row):
+        return f"{int(row['Strike']):<6} | {row['LTP']:<7.2f} | {row['Delta']:<5.2f} | {row['Theta']:<6.1f}"
+
+    for typ in ['CE', 'PE']:
+        alert_lines.append(f"\n--- {typ} Top 10 ---\nStrike | LTP    | Delta | Theta")
+        top_n = df[df['Type'] == typ].head(10)
+        for _, row in top_n.iterrows():
+            alert_lines.append(format_row(row))
 
     return split_message("\n".join(alert_lines))
 
